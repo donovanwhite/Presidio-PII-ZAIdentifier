@@ -1,35 +1,80 @@
-# Login to ACR
-az acr login --name <your-acr-name>
+# Check if Azure CLI is installed
+if ! command -v az &> /dev/null
+then
+    echo "Azure CLI could not be found. Please install it before running this script."
+    exit
+fi
 
-# Build and Push Docker Image
-docker build --no-cache -t predisio_pii:<version> .
-docker tag predisio_pii:<version> <your-acr-name>.azurecr.io/predisio_pii:<version>
-docker push <your-acr-name>.azurecr.io/predisio_pii:<version>
+# Check if Docker is installed
+if ! command -v docker &> /dev/null
+then
+    echo "Docker could not be found. Please install it before running this script."
+    exit
+fi
 
-# Create Resource Group and App Service Plan
-az group create --name <your-resource-group> --location <your-location>
-az appservice plan create --name <your-app-service-plan> --resource-group <your-resource-group> --sku P2V2 --is-linux
+# Add a switch to determine whether to deploy to existing infrastructure or create new
+while getopts "e" opt; do
+  case $opt in
+    e)
+      echo "Deploying to existing infrastructure..."
+      DEPLOY_EXISTING=true
+      ;;
+    *)
+      echo "Creating new infrastructure..."
+      DEPLOY_EXISTING=false
+      ;;
+  esac
+done
 
-# Create Managed Identity
-az identity create --name <your-identity-name> --resource-group <your-resource-group>
+# Set variables for Azure resources
+RESOURCE_GROUP="presidio-test-rg"
+LOCATION="eastus"
+SQL_SERVER_NAME="presidio-test-sql-server"
+SQL_DB_NAME="presidio-test-db"
+SQL_ADMIN_USER="sqladmin"
+SQL_ADMIN_PASSWORD="P@ssw0rd1234"
+FUNCTION_APP_NAME="presidio-test-function-app"
+ACR_NAME="presidiotestacr"
 
-# Grant ACR Pull Permissions
-principalId=$(az identity show --resource-group <your-resource-group> --name <your-identity-name> --query principalId --output tsv)
-registryId=$(az acr show --resource-group <your-acr-resource-group> --name <your-acr-name> --query id --output tsv)
-az role assignment create --assignee $principalId --scope $registryId --role "AcrPull"
+if [ "$DEPLOY_EXISTING" = false ]; then
+  # Create Resource Group
+  az group create --name $RESOURCE_GROUP --location $LOCATION
 
-# Create SQL Server and Database
-az sql server create --name <your-sql-server-name> --resource-group <your-resource-group> --location <your-location> --admin-user <your-admin-user> --admin-password <your-admin-password>
-az sql db create --resource-group <your-resource-group> --server <your-sql-server-name> --name <your-database-name> --service-objective S0
+  # Create Azure SQL Server and Database
+  az sql server create --name $SQL_SERVER_NAME --resource-group $RESOURCE_GROUP --location $LOCATION --admin-user $SQL_ADMIN_USER --admin-password $SQL_ADMIN_PASSWORD
+  az sql db create --resource-group $RESOURCE_GROUP --server $SQL_SERVER_NAME --name $SQL_DB_NAME --service-objective S0
 
-# Configure Firewall Rules
-az sql server firewall-rule create --resource-group <your-resource-group> --server <your-sql-server-name> --name AllowYourIP --start-ip-address <your-ip-address> --end-ip-address <your-ip-address>
+  # Configure Firewall Rules for Azure SQL Server
+  az sql server firewall-rule create --resource-group $RESOURCE_GROUP --server $SQL_SERVER_NAME --name AllowYourIP --start-ip-address $(curl -s ifconfig.me) --end-ip-address $(curl -s ifconfig.me)
 
-# Deploy Web App
-az webapp create --resource-group <your-resource-group> --plan <your-app-service-plan> --name <your-web-app-name> --deployment-container-image-name <your-acr-name>.azurecr.io/predisio_pii:<version>
+  # Create Azure Container Registry
+  az acr create --resource-group $RESOURCE_GROUP --name $ACR_NAME --sku Basic
 
-# Update Web App Configuration
-az webapp config container set --resource-group <your-resource-group> --name <your-web-app-name> --container-image-name <your-acr-name>.azurecr.io/predisio_pii:<version>
+  # Create Azure Function App with Docker Container
+  az functionapp create --resource-group $RESOURCE_GROUP --consumption-plan-location $LOCATION --name $FUNCTION_APP_NAME --storage-account $ACR_NAME --deployment-container-image-name $ACR_NAME.azurecr.io/presidio-pii:latest
+fi
 
-# Test Endpoints
-curl -X POST https://<your-web-app-name>.azurewebsites.net/analyze -H "Content-Type: application/json" -d '{}'
+# Deploy SQL scripts to the database - first create tables, then insert data, then other scripts
+echo "Deploying database tables..."
+sqlcmd -S tcp:$SQL_SERVER_NAME.database.windows.net -d $SQL_DB_NAME -U $SQL_ADMIN_USER -P $SQL_ADMIN_PASSWORD -i db/create_tbl.sql
+
+echo "Inserting dummy data..."
+sqlcmd -S tcp:$SQL_SERVER_NAME.database.windows.net -d $SQL_DB_NAME -U $SQL_ADMIN_USER -P $SQL_ADMIN_PASSWORD -i db/insert_dummy_data.sql
+
+echo "Deploying other database scripts..."
+for script in db/trg_before_insert.sql db/usp_call_rest_endpoint.sql db/usp_insert_comments.sql; do
+  echo "Deploying $script..."
+  sqlcmd -S tcp:$SQL_SERVER_NAME.database.windows.net -d $SQL_DB_NAME -U $SQL_ADMIN_USER -P $SQL_ADMIN_PASSWORD -i $script
+done
+
+# Build and Push Docker Image to ACR
+docker build --no-cache -t $ACR_NAME.azurecr.io/presidio-pii:latest ./app
+az acr login --name $ACR_NAME
+docker push $ACR_NAME.azurecr.io/presidio-pii:latest
+
+# Configure Function App to use the container
+az functionapp config container set --name $FUNCTION_APP_NAME --resource-group $RESOURCE_GROUP --docker-custom-image-name $ACR_NAME.azurecr.io/presidio-pii:latest
+
+# Test the Function App Endpoint
+FUNCTION_APP_URL=$(az functionapp show --name $FUNCTION_APP_NAME --resource-group $RESOURCE_GROUP --query defaultHostName -o tsv)
+echo "Function App deployed at: https://$FUNCTION_APP_URL"

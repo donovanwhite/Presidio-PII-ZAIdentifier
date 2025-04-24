@@ -2,3 +2,7 @@ fastapi
 uvicorn
 presidio-analyzer
 presidio-anonymizer
+pytest
+black
+isort
+mypy
