@@ -1,3 +1,8 @@
+#!/bin/bash
+
+# Script to deploy the Presidio PII application to Azure Container Apps
+# This replaces the previous Function App deployment
+
 # Check if Azure CLI is installed
 if ! command -v az &> /dev/null
 then
@@ -71,11 +76,6 @@ while getopts "e" opt; do
   esac
 done
 
-# If DEPLOY_EXISTING is false, print message indicating we're creating new infrastructure
-if [ "$DEPLOY_EXISTING" = false ]; then
-  echo "Creating new infrastructure..."
-fi
-
 # Set default values
 DEFAULT_LOCATION="eastus"
 DEFAULT_RESOURCE_GROUP="presidio-test-rg"
@@ -83,9 +83,9 @@ DEFAULT_SQL_SERVER_NAME="presidio-test-sql-server"
 DEFAULT_SQL_DB_NAME="presidio-test-db"
 DEFAULT_SQL_ADMIN_USER="sqladmin"
 DEFAULT_SQL_ADMIN_PASSWORD="P@ssw0rd1234"
-DEFAULT_FUNCTION_APP_NAME="presidio-test-function-app"
+DEFAULT_CONTAINER_APP_NAME="presidio-pii-app"
+DEFAULT_CONTAINER_APP_ENV="presidio-env"
 DEFAULT_ACR_NAME="presidiotestacr"
-DEFAULT_STORAGE_ACCOUNT="presidioteststorage"
 
 echo "====== Azure Deployment Configuration ======"
 echo "Please provide values for the following resources or press Enter to use defaults"
@@ -112,14 +112,14 @@ SQL_ADMIN_USER=${SQL_ADMIN_USER_INPUT:-$DEFAULT_SQL_ADMIN_USER}
 read -p "Enter SQL Admin password [$DEFAULT_SQL_ADMIN_PASSWORD]: " SQL_ADMIN_PASSWORD_INPUT
 SQL_ADMIN_PASSWORD=${SQL_ADMIN_PASSWORD_INPUT:-$DEFAULT_SQL_ADMIN_PASSWORD}
 
-read -p "Enter Function App name [$DEFAULT_FUNCTION_APP_NAME]: " FUNCTION_APP_NAME_INPUT
-FUNCTION_APP_NAME=${FUNCTION_APP_NAME_INPUT:-$DEFAULT_FUNCTION_APP_NAME}
+read -p "Enter Container App name [$DEFAULT_CONTAINER_APP_NAME]: " CONTAINER_APP_NAME_INPUT
+CONTAINER_APP_NAME=${CONTAINER_APP_NAME_INPUT:-$DEFAULT_CONTAINER_APP_NAME}
+
+read -p "Enter Container App Environment name [$DEFAULT_CONTAINER_APP_ENV]: " CONTAINER_APP_ENV_INPUT
+CONTAINER_APP_ENV=${CONTAINER_APP_ENV_INPUT:-$DEFAULT_CONTAINER_APP_ENV}
 
 read -p "Enter Azure Container Registry name [$DEFAULT_ACR_NAME]: " ACR_NAME_INPUT
 ACR_NAME=${ACR_NAME_INPUT:-$DEFAULT_ACR_NAME}
-
-read -p "Enter Storage Account name for Function App [$DEFAULT_STORAGE_ACCOUNT]: " STORAGE_ACCOUNT_INPUT
-STORAGE_ACCOUNT=${STORAGE_ACCOUNT_INPUT:-$DEFAULT_STORAGE_ACCOUNT}
 
 # Display configuration summary
 echo "====== Deployment Configuration Summary ======"
@@ -128,9 +128,9 @@ echo "Resource Group: $RESOURCE_GROUP"
 echo "SQL Server: $SQL_SERVER_NAME"
 echo "SQL Database: $SQL_DB_NAME"
 echo "SQL Admin Username: $SQL_ADMIN_USER"
-echo "Function App: $FUNCTION_APP_NAME"
+echo "Container App: $CONTAINER_APP_NAME"
+echo "Container App Environment: $CONTAINER_APP_ENV"
 echo "Azure Container Registry: $ACR_NAME"
-echo "Storage Account: $STORAGE_ACCOUNT"
 if [ "$SKIP_DOCKER_STEPS" = true ]; then
     if [ "$USE_ACR_TOKEN" = true ]; then
         echo "Docker Status: NOT AVAILABLE (using ACR token-based authentication)"
@@ -188,7 +188,7 @@ if [ "$DEPLOY_EXISTING" = false ]; then
   az sql server firewall-rule create --resource-group $RESOURCE_GROUP --server $SQL_SERVER_NAME --name AllowYourIP --start-ip-address $local_ip --end-ip-address $local_ip
   handle_error $? "SQL Firewall rule creation"
 
-  # Create Azure Container Registry regardless of Docker availability
+  # Create Azure Container Registry with admin enabled
   echo "Creating Azure Container Registry..."
   az acr create --resource-group $RESOURCE_GROUP --name $ACR_NAME --sku Basic --admin-enabled true
   handle_error $? "Azure Container Registry creation"
@@ -203,15 +203,11 @@ if [ "$DEPLOY_EXISTING" = false ]; then
   ACR_LOGIN_SERVER=$(az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP --query loginServer -o tsv)
   handle_error $? "Getting ACR login server"
 
-  # Create Storage Account for Function App
-  echo "Creating storage account for Function App..."
-  az storage account create --name $STORAGE_ACCOUNT --resource-group $RESOURCE_GROUP --location $LOCATION --sku Standard_LRS --kind StorageV2
-  handle_error $? "Storage Account creation"
+  # Create Container App Environment
+  echo "Creating Container App Environment..."
+  az containerapp env create --name $CONTAINER_APP_ENV --resource-group $RESOURCE_GROUP --location $LOCATION
+  handle_error $? "Container App Environment creation"
 
-  # Create Azure Function App with Docker Container
-  echo "Creating Function App..."
-  az functionapp create --resource-group $RESOURCE_GROUP --consumption-plan-location $LOCATION --name $FUNCTION_APP_NAME --storage-account $STORAGE_ACCOUNT --runtime python --functions-version 4 --os-type Linux
-  handle_error $? "Function App creation"
 else
   # For existing infrastructure, ensure ACR has admin enabled and get credentials
   echo "Checking existing ACR and enabling admin if needed..."
@@ -232,6 +228,16 @@ else
   # Get ACR login server
   ACR_LOGIN_SERVER=$(az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP --query loginServer -o tsv)
   handle_error $? "Getting ACR login server"
+  
+  # Check if Container App Environment exists
+  ENV_EXISTS=$(az containerapp env list --resource-group $RESOURCE_GROUP --query "[?name=='$CONTAINER_APP_ENV']" -o tsv)
+  if [ -z "$ENV_EXISTS" ]; then
+    echo "Creating Container App Environment..."
+    az containerapp env create --name $CONTAINER_APP_ENV --resource-group $RESOURCE_GROUP --location $LOCATION
+    handle_error $? "Container App Environment creation"
+  else
+    echo "Container App Environment already exists."
+  fi
 fi
 
 # Deploy SQL scripts to the database - first create tables, then insert data, then other scripts
@@ -243,12 +249,9 @@ echo "Inserting dummy data..."
 sqlcmd -S tcp:$SQL_SERVER_NAME.database.windows.net -d $SQL_DB_NAME -U $SQL_ADMIN_USER -P $SQL_ADMIN_PASSWORD -i db/insert_dummy_data.sql
 handle_error $? "Database data insertion"
 
-echo "Deploying other database scripts..."
-for script in db/trg_before_insert.sql db/usp_call_rest_endpoint.sql db/usp_insert_comments.sql; do
-  echo "Deploying $script..."
-  sqlcmd -S tcp:$SQL_SERVER_NAME.database.windows.net -d $SQL_DB_NAME -U $SQL_ADMIN_USER -P $SQL_ADMIN_PASSWORD -i $script
-  handle_error $? "Deployment of $script"
-done
+echo "Deploying database objects (stored procedures and triggers)..."
+sqlcmd -S tcp:$SQL_SERVER_NAME.database.windows.net -d $SQL_DB_NAME -U $SQL_ADMIN_USER -P $SQL_ADMIN_PASSWORD -i db/deploy_all_objects.sql
+handle_error $? "Database objects deployment"
 
 # Handle Docker-related steps
 if [ "$SKIP_DOCKER_STEPS" = false ]; then
@@ -266,10 +269,31 @@ if [ "$SKIP_DOCKER_STEPS" = false ]; then
   docker push $ACR_NAME.azurecr.io/presidio-pii:latest
   handle_error $? "Docker image push"
 
-  # Configure Function App to use the container
-  echo "Configuring Function App to use container..."
-  az functionapp config container set --name $FUNCTION_APP_NAME --resource-group $RESOURCE_GROUP --docker-custom-image-name $ACR_NAME.azurecr.io/presidio-pii:latest
-  handle_error $? "Function App container configuration"
+  # Create/Update the Container App
+  echo "Checking if Container App exists..."
+  APP_EXISTS=$(az containerapp list --resource-group $RESOURCE_GROUP --query "[?name=='$CONTAINER_APP_NAME']" -o tsv)
+  
+  if [ -z "$APP_EXISTS" ]; then
+    echo "Creating Container App..."
+    az containerapp create \
+      --name $CONTAINER_APP_NAME \
+      --resource-group $RESOURCE_GROUP \
+      --environment $CONTAINER_APP_ENV \
+      --image $ACR_LOGIN_SERVER/presidio-pii:latest \
+      --registry-server $ACR_LOGIN_SERVER \
+      --registry-username $ACR_ADMIN_USER \
+      --registry-password $ACR_ADMIN_PASSWORD \
+      --target-port 80 \
+      --ingress external
+    handle_error $? "Container App creation"
+  else
+    echo "Updating Container App..."
+    az containerapp update \
+      --name $CONTAINER_APP_NAME \
+      --resource-group $RESOURCE_GROUP \
+      --image $ACR_LOGIN_SERVER/presidio-pii:latest
+    handle_error $? "Container App update"
+  fi
   
 elif [ "$USE_ACR_TOKEN" = true ]; then
   # Token-based authentication flow without requiring Docker
@@ -298,19 +322,44 @@ elif [ "$USE_ACR_TOKEN" = true ]; then
   
   echo "Admin credentials and instructions saved to acr_admin_instructions.txt"
   
-  echo "Would you like to configure the Function App with the container image URL even though the image hasn't been pushed yet?"
-  read -p "Configure Function App with container image URL? (y/n): " CONFIGURE_FUNCTION_APP
-  if [[ $CONFIGURE_FUNCTION_APP == "y" || $CONFIGURE_FUNCTION_APP == "Y" ]]; then
-    echo "Configuring Function App to use container..."
-    az functionapp config container set --name $FUNCTION_APP_NAME --resource-group $RESOURCE_GROUP --docker-custom-image-name $ACR_LOGIN_SERVER/presidio-pii:latest
-    handle_error $? "Function App container configuration"
-    echo "Function App configured, but it won't work until you push the image to ACR."
+  echo "Would you like to create the Container App with the container image URL even though the image hasn't been pushed yet?"
+  read -p "Create Container App with container image URL? (y/n): " CREATE_CONTAINER_APP
+  if [[ $CREATE_CONTAINER_APP == "y" || $CREATE_CONTAINER_APP == "Y" ]]; then
+    echo "Creating Container App..."
+    az containerapp create \
+      --name $CONTAINER_APP_NAME \
+      --resource-group $RESOURCE_GROUP \
+      --environment $CONTAINER_APP_ENV \
+      --image $ACR_LOGIN_SERVER/presidio-pii:latest \
+      --registry-server $ACR_LOGIN_SERVER \
+      --registry-username $ACR_ADMIN_USER \
+      --registry-password $ACR_ADMIN_PASSWORD \
+      --target-port 80 \
+      --ingress external
+    handle_error $? "Container App creation"
+    echo "Container App created, but it won't work until you push the image to ACR."
   fi
 else
   echo "Skipping Docker build and deployment steps..."
 fi
 
-# Test the Function App Endpoint
-FUNCTION_APP_URL=$(az functionapp show --name $FUNCTION_APP_NAME --resource-group $RESOURCE_GROUP --query defaultHostName -o tsv)
-echo "Function App deployed at: https://$FUNCTION_APP_URL"
+# Get the Container App URL
+CONTAINER_APP_URL=$(az containerapp show --name $CONTAINER_APP_NAME --resource-group $RESOURCE_GROUP --query properties.configuration.ingress.fqdn -o tsv 2>/dev/null)
+if [ -n "$CONTAINER_APP_URL" ]; then
+  echo "Container App deployed at: https://$CONTAINER_APP_URL"
+  
+  # Update the stored procedure to use the new endpoint URL
+  echo "Updating stored procedure to use the new Container App endpoint..."
+  NEW_ENDPOINT="https://$CONTAINER_APP_URL/analyze"
+  
+  # Use sed to replace the placeholder in the template file with the actual endpoint URL
+  sed "s|{{ENDPOINT_URL}}|$NEW_ENDPOINT|g" db/update_endpoint_template.sql > db/update_endpoint.sql
+  
+  # Deploy the updated stored procedure
+  sqlcmd -S tcp:$SQL_SERVER_NAME.database.windows.net -d $SQL_DB_NAME -U $SQL_ADMIN_USER -P $SQL_ADMIN_PASSWORD -i db/update_endpoint.sql
+  handle_error $? "Updating stored procedure with new endpoint"
+  
+  echo "Endpoint URL successfully updated in the database to: $NEW_ENDPOINT"
+fi
+
 echo "Deployment completed!"
