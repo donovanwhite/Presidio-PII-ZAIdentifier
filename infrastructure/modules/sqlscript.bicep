@@ -15,10 +15,16 @@ param sqlAdminPassword string
 @description('The FQDN of the Container App')
 param containerAppFqdn string
 
+@description('The location for resources')
+param location string = resourceGroup().location
+
+// Get environment suffix for cloud agnostic deployment
+var sqlServerHostName = environment().suffixes.sqlServerHostname
+
 // Deploy a template deployment resource that executes T-SQL script
 resource sqlScript 'Microsoft.Resources/deploymentScripts@2020-10-01' = {
   name: 'updateSqlEndpointScript'
-  location: resourceGroup().location
+  location: location
   kind: 'AzureCLI'
   properties: {
     azCliVersion: '2.37.0'
@@ -44,6 +50,10 @@ resource sqlScript 'Microsoft.Resources/deploymentScripts@2020-10-01' = {
       {
         name: 'ENDPOINT_URL'
         value: 'https://${containerAppFqdn}/analyze'
+      }
+      {
+        name: 'SQL_SERVER_SUFFIX'
+        value: sqlServerHostName
       }
     ]
     scriptContent: '''
@@ -104,7 +114,7 @@ resource sqlScript 'Microsoft.Resources/deploymentScripts@2020-10-01' = {
       
       # Execute SQL script
       echo "Updating SQL stored procedure with endpoint URL: ${ENDPOINT_URL}"
-      /opt/mssql-tools/bin/sqlcmd -S ${SQL_SERVER}.database.windows.net -d ${SQL_DB} -U ${SQL_USERNAME} -P ${SQL_PASSWORD} -i update_endpoint.sql -o output.txt
+      /opt/mssql-tools/bin/sqlcmd -S ${SQL_SERVER}.${SQL_SERVER_SUFFIX} -d ${SQL_DB} -U ${SQL_USERNAME} -P ${SQL_PASSWORD} -i update_endpoint.sql -o output.txt
       
       # Check execution result
       if [ $? -ne 0 ]; then
@@ -115,8 +125,12 @@ resource sqlScript 'Microsoft.Resources/deploymentScripts@2020-10-01' = {
         echo "SQL stored procedure updated successfully!"
         cat output.txt
       fi
+
+      # Add result to the deployment script output
+      echo "{ \"result\": \"SQL procedure updated successfully with endpoint ${ENDPOINT_URL}\" }" > $AZ_SCRIPTS_OUTPUT_PATH
     '''
   }
 }
 
-output scriptLogs string = sqlScript.properties.outputs
+// Use correct output syntax
+output scriptResult object = sqlScript.properties.outputs

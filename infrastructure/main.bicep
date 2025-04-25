@@ -37,6 +37,18 @@ resource environment 'Microsoft.App/managedEnvironments@2023-05-01' existing = {
   name: containerAppEnvName
 }
 
+// Create Log Analytics workspace for Application Insights
+resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
+  name: '${appInsightsName}-workspace'
+  location: location
+  properties: {
+    sku: {
+      name: 'PerGB2018'
+    }
+    retentionInDays: 30
+  }
+}
+
 // Create Application Insights for monitoring
 resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   name: appInsightsName
@@ -44,7 +56,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   kind: 'web'
   properties: {
     Application_Type: 'web'
-    WorkspaceResourceId: environment.properties.logAnalyticsConfiguration.customerId
+    WorkspaceResourceId: logAnalyticsWorkspace.id
     publicNetworkAccessForIngestion: 'Enabled'
     publicNetworkAccessForQuery: 'Enabled'
   }
@@ -69,20 +81,6 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
             latestRevision: true
           }
         ]
-        healthCheckPath: '/health'  // Use the health endpoint we configured
-        // Add probe configuration
-        probe: {
-          httpGet: {
-            path: '/health'
-            port: 80
-            httpHeaders: []
-          }
-          initialDelaySeconds: 15
-          periodSeconds: 10
-          timeoutSeconds: 5
-          successThreshold: 1
-          failureThreshold: 3
-        }
       }
       registries: [
         {
@@ -109,7 +107,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
           image: '${acrName}.azurecr.io/presidio-pii:latest'
           resources: {
             // Increase CPU and memory resources to accommodate the spacy model
-            cpu: '1.0'
+            cpu: 1.0
             memory: '2Gi'
           }
           env: [
@@ -186,6 +184,7 @@ module updateSqlEndpoint 'modules/sqlscript.bicep' = {
     sqlAdminUsername: sqlAdminUser
     sqlAdminPassword: sqlAdminPassword
     containerAppFqdn: containerApp.properties.configuration.ingress.fqdn
+    location: location
   }
 }
 
