@@ -1,14 +1,42 @@
 import logging
+import os
 from fastapi import FastAPI, Request, HTTPException
 from presidio_analyzer import AnalyzerEngine, PatternRecognizer, Pattern
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 from presidio_analyzer.predefined_recognizers import CreditCardRecognizer
 from typing import Optional, List, Dict, Any
+from tenacity import retry, stop_after_attempt, wait_exponential
+from opencensus.ext.azure.log_exporter import AzureLogHandler
+from opencensus.ext.azure.trace_exporter import AzureExporter
+from opencensus.trace.samplers import ProbabilitySampler
+from opencensus.trace.tracer import Tracer
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging with Azure App Insights if connection string is available
+appinsights_connection_string = os.environ.get('APPLICATIONINSIGHTS_CONNECTION_STRING')
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Add console handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
+logger.addHandler(console_handler)
+
+# Configure Azure App Insights if available
+if appinsights_connection_string:
+    logger.info("Application Insights enabled")
+    azure_handler = AzureLogHandler(connection_string=appinsights_connection_string)
+    azure_handler.setFormatter(console_formatter)
+    logger.addHandler(azure_handler)
+    tracer = Tracer(
+        exporter=AzureExporter(connection_string=appinsights_connection_string),
+        sampler=ProbabilitySampler(1.0),
+    )
+else:
+    logger.info("Application Insights not configured - using console logging only")
+    tracer = None
 
 app = FastAPI()
 
@@ -72,25 +100,71 @@ class ZaIdentityCardRecognizer(PatternRecognizer):
                 filtered_results.append(result)
         return filtered_results
 
-# Initialize the engines
-analyzer = AnalyzerEngine()
-anonymizer = AnonymizerEngine()
+# Initialize the engines with retry logic
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+def initialize_analyzer():
+    logger.info("Initializing Presidio Analyzer engine")
+    return AnalyzerEngine()
 
-# Create the recognizers
-za_id_recognizer = ZaIdentityCardRecognizer()
-cc_recognizer = CreditCardRecognizer()
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+def initialize_anonymizer():
+    logger.info("Initializing Presidio Anonymizer engine")
+    return AnonymizerEngine()
 
-analyzer.registry.add_recognizer(za_id_recognizer)
-analyzer.registry.add_recognizer(cc_recognizer)
+# Initialize with retry logic
+try:
+    analyzer = initialize_analyzer()
+    anonymizer = initialize_anonymizer()
+    
+    # Create the recognizers
+    za_id_recognizer = ZaIdentityCardRecognizer()
+    cc_recognizer = CreditCardRecognizer()
+    
+    analyzer.registry.add_recognizer(za_id_recognizer)
+    analyzer.registry.add_recognizer(cc_recognizer)
+    
+    logger.info("Presidio engines initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize Presidio engines: {e}")
+    raise
+
+@app.get("/health")
+async def health_check() -> Dict[str, str]:
+    """Health check endpoint for container health monitoring"""
+    try:
+        # Verify that analyzer and anonymizer are initialized
+        if analyzer and anonymizer:
+            logger.debug("Health check succeeded")
+            return {"status": "healthy"}
+        else:
+            logger.error("Health check failed: analyzer or anonymizer not initialized")
+            return {"status": "unhealthy", "error": "Components not initialized"}
+    except Exception as e:
+        logger.error(f"Health check failed with error: {e}")
+        return {"status": "unhealthy", "error": str(e)}
 
 @app.post("/analyze")
 async def analyze(request: Request) -> Dict[str, Any]:
     try:
+        # Create a span for tracing the request if App Insights is configured
+        if tracer:
+            with tracer.span(name="analyze_text"):
+                return await _analyze_implementation(request)
+        else:
+            return await _analyze_implementation(request)
+    except Exception as e:
+        logger.error(f"Error during analysis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def _analyze_implementation(request: Request) -> Dict[str, Any]:
+    try:
         data = await request.json()
         text = data.get("text")
         if not text:
+            logger.warning("Request missing required 'text' field")
             raise HTTPException(status_code=400, detail="Text field is required")
         if len(text) > 8000:
+            logger.warning(f"Text exceeds maximum length: {len(text)} characters")
             raise HTTPException(status_code=400, detail="Text cannot exceed 8000 characters")
 
         logger.info("Analyzing text for PII...")
@@ -110,5 +184,5 @@ async def analyze(request: Request) -> Dict[str, Any]:
         return {"anonymized_text": anonymized_text}
 
     except Exception as e:
-        logger.error(f"Error during analysis: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error during _analyze_implementation: {e}")
+        raise

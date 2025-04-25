@@ -1,6 +1,36 @@
 # Presidio PII ZA Identifier
 
-This project involves deploying a web application that uses the Presidio SDK for PII detection and anonymization of the South African ID number including being able to handle input errors using a custom class, secondary to this is the built-in recognizer to handle credit card numbers.
+This project provides a comprehensive solution for PII (Personally Identifiable Information) detection and anonymization, with a specific focus on South African ID numbers and credit card information. It leverages Microsoft's Presidio SDK for sensitive information detection and implements custom recognizers for South African ID validation.
+
+## Project Overview
+
+The application is designed to:
+- Detect and anonymize South African ID numbers using a custom recognizer with Luhn checksum validation
+- Identify and mask credit card numbers using Presidio's built-in recognizers
+- Provide a REST API endpoint for text analysis
+- Integrate with Azure SQL Database using triggers and stored procedures for automated anonymization
+- Deploy as a containerized solution on Azure Container Apps (modern approach) or Azure Functions
+
+## Architecture
+
+![Architecture Diagram](https://via.placeholder.com/800x400?text=Presidio+PII+Architecture)
+
+The system consists of the following components:
+
+1. **Presidio PII Service (FastAPI Application)**:
+   - Custom South African ID recognizer with validation logic
+   - REST API endpoint for text analysis
+   - Containerized with Docker
+
+2. **Azure SQL Database**:
+   - Tables for storing call center comments
+   - Triggers for intercepting inserts and anonymizing PII
+   - Stored procedures for communicating with the Presidio service
+
+3. **Azure Container Apps / Azure Functions**:
+   - Hosts the containerized Presidio service
+   - Provides scalability and managed infrastructure
+   - Exposes HTTP endpoints for text analysis
 
 ## Refactor Branch Improvements
 
@@ -30,16 +60,116 @@ The refactor branch includes several modernization improvements to the codebase:
   - Added `-e` flag to toggle between creating new infrastructure or deploying to existing infrastructure
   - Improved deployment organization with clear steps and verbose output
   
-- **Azure Functions Integration**:
-  - Added support for deploying as Azure Functions
+- **Container Apps Integration (New)**:
+  - Added deployment to Azure Container Apps (`deploy_to_container_apps.sh`) as a modern alternative to Azure Functions
+  - Improved container configuration and security
+  - Enhanced endpoint management and integration
+
+- **Azure Functions Integration (Original)**:
+  - Support for deploying as Azure Functions with `build_presidio.sh`
   - Configured Container Registry integration
   - Set up proper resource naming and organization
 
+## Prerequisites
+
+- Azure CLI (latest version)
+- Docker Desktop (for local builds and testing)
+- SQL Command Line Tools (sqlcmd)
+- Git Bash or WSL (for running bash scripts on Windows)
+- Azure Subscription with permissions to create resources
+
+## Deployment Options
+
+### Option 1: Deploy to Azure Container Apps (Recommended)
+
+The modern approach using Azure Container Apps provides better scalability, security, and management:
+
+```bash
+# Run the deployment script
+./deploy_to_container_apps.sh
+
+# To deploy to existing infrastructure
+./deploy_to_container_apps.sh -e
+```
+
+During the deployment process, you'll be prompted to provide:
+- Azure region
+- Resource group name
+- SQL Server configuration
+- Container App configuration
+- Azure Container Registry details
+
+### Option 2: Deploy to Azure Functions (Original)
+
+The original deployment approach using Azure Functions:
+
+```bash
+# Run the deployment script
+./build_presidio.sh
+
+# To deploy to existing infrastructure
+./build_presidio.sh -e
+```
+
+### Testing the Deployment
+
+After deployment, you can verify the installation using:
+
+```bash
+# Verify database objects
+./verify_db_objects.sh
+
+# Test anonymization functionality
+./run_test_anonymization.sh
+```
+
+## Workflow
+
+1. When text containing PII (like South African ID numbers) is inserted into the database:
+   - The database trigger intercepts the insertion
+   - The trigger calls the stored procedure to send the text to the Presidio service
+   - The service analyzes and anonymizes the text
+   - The anonymized text is stored in the database
+
+2. The Presidio service:
+   - Detects South African IDs using custom pattern recognition and validation
+   - Masks detected PII with placeholder characters
+   - Returns the anonymized text preserving the original format
+
+## Development and Testing
+
+For local development:
+
+1. Build and run the Docker container locally:
+   ```bash
+   cd app
+   docker build -t presidio-pii:dev .
+   docker run -p 8000:80 presidio-pii:dev
+   ```
+
+2. Test the API endpoint:
+   ```bash
+   curl -X POST http://localhost:8000/analyze \
+     -H "Content-Type: application/json" \
+     -d '{"text": "Customer ID: 9010205584087"}'
+   ```
+
+## Azure Best Practices
+
+This project follows Azure best practices including:
+
+- Container-based deployment for isolation and scalability
+- Proper error handling and logging
+- Secure deployment with parameter-based configuration
+- Azure Container Registry integration
+- Database security with trigger-based anonymization
+- Non-root user in container for improved security
+
 ## Original Project Documentation
 
-This project involves deploying a web application that uses the Presidio SDK for PII detection and anonymization of the South Africa African ID number including being able to handle input errors using a custom class, secondary to this is the builtin recognizer to handle credit card numbers. The deployment process includes building a Docker image, pushing it to Azure Container Registry (ACR), deploying it to Azure App Service, setting up an Azure SQL Database, and creating necessary stored procedures and triggers. 
+This project involves deploying a web application that uses the Presidio SDK for PII detection and anonymization of the South African ID number including being able to handle input errors using a custom class, secondary to this is the built-in recognizer to handle credit card numbers. The deployment process includes building a Docker image, pushing it to Azure Container Registry (ACR), deploying it to Azure App Service or Azure Container Apps, setting up an Azure SQL Database, and creating necessary stored procedures and triggers. 
 
-Below are the key steps involved, please refer to the app and db folder for the artefacts as well as the build_presidio.sh for the az commands:
+Below are the key steps involved, please refer to the app and db folder for the artefacts as well as the deployment scripts for the az commands:
 
 ### 1. Azure Container Registry (ACR) Setup
 - Login to ACR: Authenticate to the Azure Container Registry using the az acr login command.
@@ -65,3 +195,7 @@ Below are the key steps involved, please refer to the app and db folder for the 
 
 ### 6. Testing the Deployment
 - Test Endpoints: Use curl commands to test the web application's endpoints and ensure it correctly detects and anonymizes PII.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
