@@ -107,7 +107,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
           image: '${acrName}.azurecr.io/presidio-pii:latest'
           resources: {
             // Increase CPU and memory resources to accommodate the spacy model
-            cpu: 1.0
+            cpu: 1
             memory: '2Gi'
           }
           env: [

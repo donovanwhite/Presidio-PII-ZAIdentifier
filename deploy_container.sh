@@ -64,6 +64,19 @@ LOCATION=${LOCATION_INPUT:-$DEFAULT_LOCATION}
 read -p "Enter Resource Group name [$DEFAULT_RESOURCE_GROUP]: " RESOURCE_GROUP_INPUT
 RESOURCE_GROUP=${RESOURCE_GROUP_INPUT:-$DEFAULT_RESOURCE_GROUP}
 
+# Common parameters for both deployment types
+read -p "Enter Container App name [$DEFAULT_CONTAINER_APP_NAME]: " CONTAINER_APP_NAME_INPUT
+CONTAINER_APP_NAME=${CONTAINER_APP_NAME_INPUT:-$DEFAULT_CONTAINER_APP_NAME}
+
+read -p "Enter SQL Database name [$DEFAULT_SQL_DB_NAME]: " SQL_DB_NAME_INPUT
+SQL_DB_NAME=${SQL_DB_NAME_INPUT:-$DEFAULT_SQL_DB_NAME}
+
+read -p "Enter SQL Admin username [$DEFAULT_SQL_ADMIN_USER]: " SQL_ADMIN_USER_INPUT
+SQL_ADMIN_USER=${SQL_ADMIN_USER_INPUT:-$DEFAULT_SQL_ADMIN_USER}
+
+read -p "Enter SQL Admin password [$DEFAULT_SQL_ADMIN_PASSWORD]: " SQL_ADMIN_PASSWORD_INPUT
+SQL_ADMIN_PASSWORD=${SQL_ADMIN_PASSWORD_INPUT:-$DEFAULT_SQL_ADMIN_PASSWORD}
+
 # For partial deployment, resources must exist
 if [[ "$IS_FULL_DEPLOYMENT" == "false" ]]; then
     echo "====== Existing Resources Information ======"
@@ -108,12 +121,9 @@ if [[ "$IS_FULL_DEPLOYMENT" == "false" ]]; then
         exit 1
     fi
 else
-    # For full deployment, prompt for all resource names
+    # For full deployment, prompt for remaining infrastructure names
     read -p "Enter SQL Server name [$DEFAULT_SQL_SERVER_NAME]: " SQL_SERVER_NAME_INPUT
     SQL_SERVER_NAME=${SQL_SERVER_NAME_INPUT:-$DEFAULT_SQL_SERVER_NAME}
-
-    read -p "Enter Container App name [$DEFAULT_CONTAINER_APP_NAME]: " CONTAINER_APP_NAME_INPUT
-    CONTAINER_APP_NAME=${CONTAINER_APP_NAME_INPUT:-$DEFAULT_CONTAINER_APP_NAME}
 
     read -p "Enter Container App Environment name [$DEFAULT_CONTAINER_APP_ENV]: " CONTAINER_APP_ENV_INPUT
     CONTAINER_APP_ENV=${CONTAINER_APP_ENV_INPUT:-$DEFAULT_CONTAINER_APP_ENV}
@@ -121,19 +131,6 @@ else
     read -p "Enter Azure Container Registry name [$DEFAULT_ACR_NAME]: " ACR_NAME_INPUT
     ACR_NAME=${ACR_NAME_INPUT:-$DEFAULT_ACR_NAME}
 fi
-
-# Always prompt for these params regardless of deployment type
-read -p "Enter Container App name [$DEFAULT_CONTAINER_APP_NAME]: " CONTAINER_APP_NAME_INPUT
-CONTAINER_APP_NAME=${CONTAINER_APP_NAME_INPUT:-$DEFAULT_CONTAINER_APP_NAME}
-
-read -p "Enter SQL Database name [$DEFAULT_SQL_DB_NAME]: " SQL_DB_NAME_INPUT
-SQL_DB_NAME=${SQL_DB_NAME_INPUT:-$DEFAULT_SQL_DB_NAME}
-
-read -p "Enter SQL Admin username [$DEFAULT_SQL_ADMIN_USER]: " SQL_ADMIN_USER_INPUT
-SQL_ADMIN_USER=${SQL_ADMIN_USER_INPUT:-$DEFAULT_SQL_ADMIN_USER}
-
-read -p "Enter SQL Admin password [$DEFAULT_SQL_ADMIN_PASSWORD]: " SQL_ADMIN_PASSWORD_INPUT
-SQL_ADMIN_PASSWORD=${SQL_ADMIN_PASSWORD_INPUT:-$DEFAULT_SQL_ADMIN_PASSWORD}
 
 # Display configuration summary
 echo "====== Deployment Configuration Summary ======"
