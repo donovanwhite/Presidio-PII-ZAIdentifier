@@ -72,7 +72,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
       activeRevisionsMode: 'Single'
       ingress: {
         external: true
-        targetPort: 80
+        targetPort: 8080
         transport: 'http'
         allowInsecure: false
         traffic: [
@@ -122,7 +122,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
               type: 'Startup'
               httpGet: {
                 path: '/health'
-                port: 80
+                port: 8080
               }
               initialDelaySeconds: 30
               periodSeconds: 15
@@ -134,7 +134,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
               type: 'Liveness'
               httpGet: {
                 path: '/health'
-                port: 80
+                port: 8080
               }
               initialDelaySeconds: 30
               periodSeconds: 15
@@ -146,7 +146,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
               type: 'Readiness'
               httpGet: {
                 path: '/health'
-                port: 80
+                port: 8080
               }
               initialDelaySeconds: 15
               periodSeconds: 10

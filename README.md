@@ -37,10 +37,13 @@ The system consists of the following components:
 The refactor branch includes several modernization improvements to the codebase:
 
 ### 1. Application Enhancements
-- **Updated Dockerfile**:
+- **Updated Dockerfile** (Latest Changes):
   - Upgraded to Python 3.11-slim (from 3.9)
   - Added non-root user for improved security
   - Optimized container build process
+  - Added proper health check via curl commands
+  - Separate layers for better caching and smaller image
+  - Explicit port 8080 exposure for Container Apps integration
   
 - **Improved Python Application**:
   - Added proper logging for better observability
@@ -60,11 +63,14 @@ The refactor branch includes several modernization improvements to the codebase:
   - Added `-e` flag to toggle between creating new infrastructure or deploying to existing infrastructure
   - Improved deployment organization with clear steps and verbose output
   
-- **Container Apps Integration (New)**:
-  - Added deployment to Azure Container Apps (`deploy_to_container_apps.sh`) as a modern alternative to Azure Functions
-  - Improved container configuration and security
-  - Enhanced endpoint management and integration
-
+- **Container Apps Integration** (Latest Changes):
+  - Added Application Insights integration for comprehensive monitoring
+  - Improved container probes (startup, liveness, readiness) for better reliability
+  - Proper resource allocation (1 CPU, 2GB memory) for SpaCy models
+  - Enhanced autoscaling configuration based on concurrent requests
+  - Secure registry integration with Azure Container Registry
+  - Automated SQL endpoint updates through Bicep modules
+  
 - **Azure Functions Integration (Original)**:
   - Support for deploying as Azure Functions with `build_presidio.sh`
   - Configured Container Registry integration
@@ -144,14 +150,19 @@ For local development:
    ```bash
    cd app
    docker build -t presidio-pii:dev .
-   docker run -p 8000:80 presidio-pii:dev
+   docker run -p 8080:8080 presidio-pii:dev
    ```
 
 2. Test the API endpoint:
    ```bash
-   curl -X POST http://localhost:8000/analyze \
+   curl -X POST http://localhost:8080/analyze \
      -H "Content-Type: application/json" \
      -d '{"text": "Customer ID: 9010205584087"}'
+   ```
+
+3. Test container health:
+   ```bash
+   curl http://localhost:8080/health
    ```
 
 ## Azure Best Practices
@@ -159,11 +170,14 @@ For local development:
 This project follows Azure best practices including:
 
 - Container-based deployment for isolation and scalability
-- Proper error handling and logging
-- Secure deployment with parameter-based configuration
-- Azure Container Registry integration
-- Database security with trigger-based anonymization
+- Proper error handling and logging with Application Insights
+- Comprehensive health checks and container probes
 - Non-root user in container for improved security
+- Secure deployment with parameter-based configuration
+- Auto-scaling based on concurrent requests
+- Azure Container Registry with secure integration
+- Database security with trigger-based anonymization
+- Infrastructure as Code (Bicep) for consistent deployments
 
 ## Original Project Documentation
 

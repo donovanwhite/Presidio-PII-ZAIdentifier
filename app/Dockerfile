@@ -27,13 +27,13 @@ RUN chown -R appuser:appuser /app
 
 # Add HEALTHCHECK instruction to verify container health
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-  CMD curl -f http://localhost:80/health || exit 1
+  CMD curl -f http://localhost:8080/health || exit 1
 
 # Switch to non-root user for security
 USER appuser
 
-# Make port 80 available 
-EXPOSE 80
+# Make port 8080 available
+EXPOSE 8080
 
 # Run FastAPI application when the container launches
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
