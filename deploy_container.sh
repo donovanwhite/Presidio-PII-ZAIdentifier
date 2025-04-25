@@ -324,7 +324,56 @@ handle_error $? "Bicep deployment"
 
 # Get the Container App URL
 CONTAINER_APP_URL=$(az containerapp show --name $CONTAINER_APP_NAME --resource-group $RESOURCE_GROUP --query properties.configuration.ingress.fqdn -o tsv)
+handle_error $? "Getting Container App URL"
 echo "✅ Container App deployed successfully at: https://$CONTAINER_APP_URL"
+
+# Create a SQL script to update the stored procedure with the correct endpoint URL
+echo "==== Updating SQL stored procedure with Container App endpoint URL ===="
+cat > update_sp_endpoint.sql << EOF
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+-- Check if procedure exists before creating or updating
+IF EXISTS (SELECT * FROM sys.procedures WHERE name = 'usp_call_rest_endpoint')
+BEGIN
+    -- Update existing stored procedure with the new endpoint URL
+    DROP PROCEDURE [dbo].[usp_call_rest_endpoint]
+END
+GO
+
+-- Create the stored procedure with the new endpoint URL
+CREATE PROCEDURE [dbo].[usp_call_rest_endpoint]
+    @input_data NVARCHAR(MAX),
+    @response NVARCHAR(MAX) OUTPUT
+AS
+BEGIN
+    -- The endpoint URL from Container App
+    DECLARE @url NVARCHAR(MAX) = 'https://$CONTAINER_APP_URL/analyze';
+    DECLARE @headers NVARCHAR(MAX) = '{"Content-Type": "application/json"}';
+    DECLARE @payload NVARCHAR(MAX) = '{"text": "' + @input_data + '"}';
+
+    -- Call the external REST endpoint
+    EXEC sp_invoke_external_rest_endpoint
+        @url = @url,
+        @method = 'POST',
+        @headers = @headers,
+        @payload = @payload,
+        @response = @response OUTPUT;
+END
+GO
+
+-- Print confirmation message
+PRINT 'Stored procedure updated with endpoint: https://$CONTAINER_APP_URL/analyze';
+GO
+EOF
+
+# Execute the SQL script to update the stored procedure
+echo "Updating SQL stored procedure with endpoint URL: https://$CONTAINER_APP_URL/analyze"
+sqlcmd -S tcp:$SQL_SERVER_NAME.database.windows.net -d $SQL_DB_NAME -U $SQL_ADMIN_USER -P $SQL_ADMIN_PASSWORD -i update_sp_endpoint.sql
+handle_error $? "SQL stored procedure update"
+echo "✅ SQL stored procedure updated successfully with Container App endpoint"
 
 # Deploy database objects for both full and partial deployment
 echo "==== Deploying database objects ===="

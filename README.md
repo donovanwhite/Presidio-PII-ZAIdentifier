@@ -92,10 +92,7 @@ The modern approach using Azure Container Apps provides better scalability, secu
 
 ```bash
 # Run the deployment script
-./deploy_to_container_apps.sh
-
-# To deploy to existing infrastructure
-./deploy_to_container_apps.sh -e
+./deploy_container.sh
 ```
 
 During the deployment process, you'll be prompted to provide:
@@ -105,17 +102,19 @@ During the deployment process, you'll be prompted to provide:
 - Container App configuration
 - Azure Container Registry details
 
-### Option 2: Deploy to Azure Functions (Original)
+### Option 2: Deploy to Azure Functions (Legacy - Not Recommended)
 
-The original deployment approach using Azure Functions:
+> **⚠️ Warning:** The `build_presidio.sh` script is provided for backward compatibility only and is not the preferred method. It may introduce errors and lacks some of the modern best practices implemented in the Container Apps deployment option.
 
 ```bash
-# Run the deployment script
+# Run the deployment script (not recommended)
 ./build_presidio.sh
 
-# To deploy to existing infrastructure
+# To deploy to existing infrastructure (not recommended)
 ./build_presidio.sh -e
 ```
+
+The Function App-based deployment should only be considered if you have specific requirements that cannot be met with Container Apps.
 
 ### Testing the Deployment
 
