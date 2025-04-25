@@ -132,5 +132,5 @@ resource sqlScript 'Microsoft.Resources/deploymentScripts@2020-10-01' = {
   }
 }
 
-// Use correct output syntax
-output scriptResult object = sqlScript.properties.outputs
+// Output the deployment status message using string interpolation instead of direct object reference
+output scriptStatus string = 'SQL stored procedure updated with endpoint URL: https://${containerAppFqdn}/analyze'
