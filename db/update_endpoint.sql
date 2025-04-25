@@ -1,6 +1,6 @@
 -- SQL Template to update the endpoint URL in the usp_call_rest_endpoint stored procedure
 -- This will be used to configure the stored procedure with the correct Container App URL
--- The https://presidio-pii-app.orangehill-9ef8c1e0.northeurope.azurecontainerapps.io/analyze placeholder will be replaced during deployment
+-- The https://presidio-pii-app.nicerock-457c1be5.westeurope.azurecontainerapps.io/analyze placeholder will be replaced during deployment
 
 SET ANSI_NULLS ON
 GO
@@ -22,7 +22,7 @@ CREATE PROCEDURE [dbo].[usp_call_rest_endpoint]
 AS
 BEGIN
     -- The endpoint URL will be replaced during deployment
-    DECLARE @url NVARCHAR(MAX) = 'https://presidio-pii-app.orangehill-9ef8c1e0.northeurope.azurecontainerapps.io/analyze';
+    DECLARE @url NVARCHAR(MAX) = 'https://presidio-pii-app.nicerock-457c1be5.westeurope.azurecontainerapps.io/analyze';
     DECLARE @headers NVARCHAR(MAX) = '{"Content-Type": "application/json"}';
     DECLARE @payload NVARCHAR(MAX) = '{"text": "' + @input_data + '"}';
 
@@ -37,5 +37,5 @@ END
 GO
 
 -- Print confirmation message
-PRINT 'Stored procedure created/updated with endpoint: https://presidio-pii-app.orangehill-9ef8c1e0.northeurope.azurecontainerapps.io/analyze';
+PRINT 'Stored procedure created/updated with endpoint: https://presidio-pii-app.nicerock-457c1be5.westeurope.azurecontainerapps.io/analyze';
 GO
